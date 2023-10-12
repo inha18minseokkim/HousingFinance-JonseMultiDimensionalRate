@@ -8,38 +8,37 @@ import com.example.housingfinancejonsemultidimensionalrate.Entity.MultiDimension
 import com.example.housingfinancejonsemultidimensionalrate.Repository.MultiDimensionalRateRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.Step;
+import org.springframework.batch.core.*;
 import org.springframework.batch.core.job.builder.JobBuilder;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.batch.core.launch.support.TaskExecutorJobLauncher;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.Chunk;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuilder;
 import org.springframework.batch.item.support.CompositeItemProcessor;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
+import java.time.LocalDateTime;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Configuration
 @RequiredArgsConstructor
 @Slf4j
 public class JobConfiguration {
-    @Value("${env.loadYm}")
+    @Value("${loanYearMonth}")
     private String loanYearMonth;
     private final MultiDimensionalRateReceive receiver;
 
@@ -47,11 +46,28 @@ public class JobConfiguration {
     private final JobRepository jobRepository;
     private final PlatformTransactionManager platformTransactionManager;
     private final MultiDimensionalRateRepository repository;
+    private static int requestCount = 0;
     @Bean
-    public Job multiDimensionalRateJob() {
-        return new JobBuilder("multiDimensionalRateJob",jobRepository)
-                .start(multiDimensionalRateStep())
-                .build();
+    public JobParameters jobParameters() {
+        return new JobParametersBuilder().addString("loanYearMonth",loanYearMonth)
+                .addLocalDateTime("executeDate", LocalDateTime.now())
+                .toJobParameters();
+    }
+    @Bean
+    public JobExecution jobExecution() throws Exception {
+        return jobLauncher().run(
+                new JobBuilder("multiDimensionalRateJob",jobRepository)
+                        .start(multiDimensionalRateStep())
+                        .build()
+                ,jobParameters());
+    }
+    @Bean
+    public JobLauncher jobLauncher() throws Exception {
+        TaskExecutorJobLauncher taskExecutorJobLauncher = new TaskExecutorJobLauncher();
+        taskExecutorJobLauncher.setJobRepository(jobRepository);
+        taskExecutorJobLauncher.setTaskExecutor(new SimpleAsyncTaskExecutor());
+        taskExecutorJobLauncher.afterPropertiesSet();
+        return taskExecutorJobLauncher;
     }
     @Bean
     public Step multiDimensionalRateStep() {
@@ -101,6 +117,10 @@ public class JobConfiguration {
     public ItemProcessor<MultiDimensionalRateRequest, List<Map.Entry<MultiDimensionalRateRequest,MultiDimensionalRateItem>>> itemReceiveProcessor() {
         return item -> {
             MultiDimensionalRateResponse multiDimensionalRateResponse = receiver.apiReceive(item);
+            if(requestCount % 3 == 2){
+                Thread.sleep(500);
+            }
+            requestCount++;
             if(!multiDimensionalRateResponse.getHeader().getResultCode().equals("00"))
                 throw new RuntimeException("API 수신 실패" + item);
             return multiDimensionalRateResponse.getBody().getItems()

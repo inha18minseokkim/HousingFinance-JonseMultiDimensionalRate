@@ -117,8 +117,8 @@ public class JobConfiguration {
     public ItemProcessor<MultiDimensionalRateRequest, List<Map.Entry<MultiDimensionalRateRequest,MultiDimensionalRateItem>>> itemReceiveProcessor() {
         return item -> {
             MultiDimensionalRateResponse multiDimensionalRateResponse = receiver.apiReceive(item);
-            if(requestCount % 3 == 2){
-                Thread.sleep(500);
+            if(requestCount % 3 == 1){
+                Thread.sleep(1000);
             }
             requestCount++;
             if(!multiDimensionalRateResponse.getHeader().getResultCode().equals("00"))
